@@ -2,7 +2,20 @@
 #include <stdlib.h>
 #include <CL/cl.h>
 
-
+#define FILE_MAX_LENGTH 1000000
+char *createProgramFromFile(const char*fileName, size_t *sourceSize) {
+	//const char fileName[] = "matrixmul2.cl";
+	char *source_str;
+	FILE* fp = fopen(fileName, "rb");
+	if (!fp) {
+		printf("Error while loading the source code %s\n", fp);
+		exit(-1);
+	}
+	source_str = (char *)malloc(sizeof(char)*FILE_MAX_LENGTH);
+	*sourceSize = fread(source_str, 1, FILE_MAX_LENGTH, fp);
+	fclose(fp);
+	return source_str;
+}
 
 int main() {
 
@@ -81,11 +94,43 @@ int main() {
 		printf("Error %d when creating the queue for the device %d on platform %d\n", status, selectedDevice, numPlatforms - 1);
 		exit(status);
 	}
+
+	// creating the program
+	size_t sourceSize;
+	char * programStr = createProgramFromFile("Kernels.cl",&sourceSize);
+
+	cl_program clProgram;
+	clProgram = clCreateProgramWithSource(context, 1, (const char **)&programStr, (const size_t*)&sourceSize, &status);
+	if (status != 0) {
+		printf("Error when creating the program from the sources %d\n", status);
+		exit(status);
+	}
+	status = clBuildProgram(clProgram, 0, NULL, NULL, NULL, NULL);
+	if (status != 0) {
+		printf("Error when compiling the opencl code: %d\n", status);
+		// Allocate memory for the log
+		int log_size = 100000;
+		char *log = (char *)malloc(log_size);
+
+		// Get the log
+		clGetProgramBuildInfo(clProgram, devices[0], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+		printf("%s\n", log);
+		exit(status);
+	}
+
+	cl_kernel clKernel;
+	clKernel = clCreateKernel(clProgram, "foo", &status);
+	if (status != 0) {
+		printf("Error when selecting the kernel to execute: %d\n", status);
+		exit(status);
+	}
+
 	
 	//free host resources
 	clReleaseContext(context);
 	clReleaseCommandQueue(cmdQueue);
 	free(devices);
 	free(platforms);
+	free(programStr);
 	return 0;
 }
