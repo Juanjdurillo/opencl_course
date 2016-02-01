@@ -113,7 +113,7 @@ int main() {
 		char *log = (char *)malloc(log_size);
 
 		// Get the log
-		clGetProgramBuildInfo(clProgram, devices[0], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+		clGetProgramBuildInfo(clProgram, devices[selectedDevice], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
 		printf("%s\n", log);
 		exit(status);
 	}
@@ -126,9 +126,17 @@ int main() {
 	}
 
 	
+	size_t globalWorkSize[1];
+	size_t localWorkSize[1];
+	globalWorkSize[0] = 8;
+	localWorkSize[0] = 8;
 
-
-
+	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 1, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
+	if (status != 0) {
+		printf("Errror %d when enqueuing the kernel for execution",status);
+		exit(status);
+	}
+	
 	//free host resources
 	clReleaseContext(context);
 	clReleaseCommandQueue(cmdQueue);
