@@ -24,6 +24,27 @@ int main() {
 	cl_uint numDevices = 0;
 	cl_platform_id *platforms = NULL;
 	cl_device_id   *devices = NULL;
+	cl_mem bufferA, bufferB, bufferC;
+	int *A = NULL; // input array
+	int *B = NULL; // input array
+	int *C = NULL; // output array
+
+	//Elements in each array
+	const int elements = 8;
+
+	//size of the data
+	size_t datasize = sizeof(int)*elements;
+
+	// Allocate space for input/output data
+	A = (int *)malloc(datasize);
+	B = (int *)malloc(datasize);
+	C = (int *)malloc(datasize);
+
+	// Initialize the input data
+	for (int i = 0; i < elements; i++)  {
+		A[i] = i;
+		B[i] = i;
+	}
 
 
 	// the number of platforms is retrieved by using a first call
@@ -85,7 +106,7 @@ int main() {
 	cl_int selectedDevice = 0;
 	cl_command_queue cmdQueue;
 
-	cl_queue_properties qprop[] = { CL_QUEUE_PROPERTIES,(cl_command_queue_properties)CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
+	cl_queue_properties qprop[] = { CL_QUEUE_PROPERTIES,(cl_command_queue_properties)
 									CL_QUEUE_PROFILING_ENABLE, 0 };
 	
 
@@ -119,13 +140,51 @@ int main() {
 	}
 
 	cl_kernel clKernel;
-	clKernel = clCreateKernel(clProgram, "foo", &status);
+	clKernel = clCreateKernel(clProgram, "vecadd", &status);
 	if (status != 0) {
 		printf("Error when selecting the kernel to execute: %d\n", status);
 		exit(status);
 	}
 
+	bufferA = clCreateBuffer(context, CL_MEM_READ_ONLY, datasize, NULL, &status);
+	if (status != 0) {
+		printf("Error %d when creating a memory buffer\n",status);
+		exit(status);
+	}
+	bufferB = clCreateBuffer(context, CL_MEM_READ_ONLY, datasize, NULL, &status);
+	if (status != 0) {
+		printf("Error %d when creating a memory buffer\n", status);
+		exit(status);
+	}
 	
+	bufferC = clCreateBuffer(context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
+	if (status != 0) {
+		printf("Error %d when creating a memory buffer\n", status);
+		exit(status);
+	}
+
+	// write data from the host to the device 
+	status = clEnqueueWriteBuffer(cmdQueue, bufferA, CL_FALSE, 0, datasize, A, 0, NULL, NULL);
+	if (status != 0) {
+		printf("Error %d when writing information into the device\n", status);
+		exit(status);
+	}
+	
+	status = clEnqueueWriteBuffer(cmdQueue, bufferB, CL_FALSE, 0, datasize, B, 0, NULL, NULL);
+	if (status != 0) {
+		printf("Error %d when writing information into the device\n", status);
+		exit(status);
+	}
+
+	//we need to set the parameters for the kernel
+	status = clSetKernelArg(clKernel, 0, sizeof(cl_mem), &bufferA);
+	status |= clSetKernelArg(clKernel, 1, sizeof(cl_mem), &bufferB);
+	status |= clSetKernelArg(clKernel, 2, sizeof(cl_mem), &bufferC);
+	if (status != 0) {
+		printf("Error when setting the parameters of the kernel\n");
+		exit(-1);
+	}
+
 	size_t globalWorkSize[1];
 	size_t localWorkSize[1];
 	globalWorkSize[0] = 8;
@@ -136,14 +195,26 @@ int main() {
 		printf("Errror %d when enqueuing the kernel for execution",status);
 		exit(status);
 	}
+
+	status = clEnqueueReadBuffer(cmdQueue, bufferC, CL_TRUE, 0, datasize, C, 0, NULL, NULL);
 	
+	for (int i = 0; i < elements; i++) {
+		printf("%d\n", C[i]);
+	}
+
 	//free host resources
 	clReleaseContext(context);
 	clReleaseCommandQueue(cmdQueue);
 	clReleaseProgram(clProgram);
 	clReleaseKernel(clKernel);
+	clReleaseMemObject(bufferA);
+	clReleaseMemObject(bufferB);
+	clReleaseMemObject(bufferC);
 	free(devices);
 	free(platforms);
 	free(programStr);
+	free(A);
+	free(B);
+	free(C);
 	return 0;
 }
