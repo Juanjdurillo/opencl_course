@@ -126,9 +126,14 @@ int main() {
 	}
 
 	
+
+
+
 	//free host resources
 	clReleaseContext(context);
 	clReleaseCommandQueue(cmdQueue);
+	clReleaseProgram(clProgram);
+	clReleaseKernel(clKernel);
 	free(devices);
 	free(platforms);
 	free(programStr);
