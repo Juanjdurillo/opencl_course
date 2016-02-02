@@ -143,7 +143,7 @@ int main() {
 	}
 
 	cl_kernel clKernel;
-	clKernel = clCreateKernel(clProgram, "matrixMul", &status);
+	clKernel = clCreateKernel(clProgram, "matrixMul2", &status);
 	if (status != 0) {
 		printf("Error when selecting the kernel to execute: %d\n", status);
 		exit(status);
@@ -196,8 +196,8 @@ int main() {
 	globalWorkSize[0] = elements;
 	globalWorkSize[1] = elements;
 
-	localWorkSize[0] = 16;
-	localWorkSize[1] = 16;
+	localWorkSize[0] = 8;
+	localWorkSize[1] = 8;
 
 	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 2, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
 	if (status != 0) {
