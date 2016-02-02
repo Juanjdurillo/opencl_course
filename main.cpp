@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <CL/cl.h>
+#include "pthread.h"
 
 #define FILE_MAX_LENGTH 1000000
 
@@ -12,6 +13,16 @@ typedef struct
 	int edgeCount;		// #edges
 	float *weightArray;	// weights
 } GraphData;
+
+
+typedef struct {
+	int begin;
+	int end;
+	cl_device_id *device;
+	cl_context context;
+	GraphData graph;
+} Arguments;
+
 
 
 int roundWorkSizeUp(int groupSize, int globalSize)
@@ -71,87 +82,35 @@ char *createProgramFromFile(const char*fileName, size_t *sourceSize) {
 	return source_str;
 }
 
-int main() {
+void dijkstra_thread(Arguments *args) {
+
+	int begin = args->begin; 
+	int end  =  args->end;
+	cl_context context = args->context;
+	GraphData graph = args->graph;
+
 
 	cl_int status;
-	cl_uint numPlatforms = 0;
-	cl_uint numDevices = 0;
-	cl_platform_id *platforms = NULL;
-	cl_device_id   *devices = NULL;
+	size_t sourceSize;
+	char * programStr = createProgramFromFile("Kernels.cl", &sourceSize);
+	size_t maxWorkGroupSize;
+	clGetDeviceInfo(*args->device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, NULL);
+	size_t localWorkSize = maxWorkGroupSize;
+	printf("%d vertex count\n",graph.vertexCount);
+	printf("%d begin\n", begin);
+	printf("%d end \n", end);
+	
+	size_t globalWorkSize = roundWorkSizeUp(localWorkSize, graph.vertexCount);
 
 
-	// the number of platforms is retrieved by using a first call
-	// to clGetPlatformsIDs() with NULL argument as second argument
-	status = clGetPlatformIDs(0, NULL, &numPlatforms);
-	if (status != 0) {
-		printf("Status value %d\n",status);
-		exit(status);
-	}
-
-	printf("Number of platforms: %d\n", numPlatforms);
-
-
-	// allocating memory for the platforms
-	platforms = (cl_platform_id *)malloc(numPlatforms * sizeof(cl_platform_id));
-
-	if (platforms == NULL) {
-		printf("Not enough memory\n");
-		exit(-1);
-	}
-
-	// the second call, get the platforms
-	status = clGetPlatformIDs(numPlatforms, platforms, NULL);
-	if (status != 0) {
-		printf("Status value %d\n", status);
-		exit(status);
-	}
-
-	status = clGetDeviceIDs(platforms[numPlatforms-1], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
-	if (status != 0) {
-		printf("Error %d while retrieving number of devices for platform %d\n", status, numPlatforms-1);
-		exit(-1);
-	}
-
-	// allocate space for devices
-	devices = (cl_device_id *)malloc(sizeof(cl_device_id)*numDevices);
-	if (devices == NULL) {
-		printf("Error allocating memory to store devices id for platform %d\n", numPlatforms-1);
-		exit(-1);
-	}
-
-	//we obtain them althoug so far we do nothing with them
-	status = clGetDeviceIDs(platforms[numPlatforms-1], CL_DEVICE_TYPE_ALL, numDevices, devices, 0);
-	if (status != 0) {
-		printf("Error %d when obtaining devices on platform %d\n", status, numPlatforms - 1);
-		exit(status);
-	}
-		
-	//creating a context 
-	//-------------creating a context-------------------------//
-	cl_context context = NULL;
-	context = clCreateContext(NULL, numDevices, devices, NULL, NULL, &status);
-	if (status != 0) {
-		printf("Error %d when creating the context in platform %d\n", status, numPlatforms - 1);
-		exit(status);
-	}
-
-	// creating a command queue
-	cl_int selectedDevice = 0;
 	cl_command_queue cmdQueue;
 
-	cl_queue_properties qprop[] = { CL_QUEUE_PROPERTIES,(cl_command_queue_properties)
-									CL_QUEUE_PROFILING_ENABLE, 0 };
-	
-
-	cmdQueue = clCreateCommandQueueWithProperties(context, devices[selectedDevice],qprop, &status);
+	cmdQueue = clCreateCommandQueueWithProperties(context, *args->device, NULL, &status);
 	if (status != 0) {
-		printf("Error %d when creating the queue for the device %d on platform %d\n", status, selectedDevice, numPlatforms - 1);
+		printf("Error %d when creating the queue for the device\n", status);
 		exit(status);
 	}
 
-	// creating the program
-	size_t sourceSize;
-	char * programStr = createProgramFromFile("Kernels.cl",&sourceSize);
 
 	cl_program clProgram;
 	clProgram = clCreateProgramWithSource(context, 1, (const char **)&programStr, (const size_t*)&sourceSize, &status);
@@ -167,11 +126,11 @@ int main() {
 		char *log = (char *)malloc(log_size);
 
 		// Get the log
-		clGetProgramBuildInfo(clProgram, devices[selectedDevice], CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
+		clGetProgramBuildInfo(clProgram,*args->device, CL_PROGRAM_BUILD_LOG, log_size, log, NULL);
 		printf("%s\n", log);
 		exit(status);
 	}
-	
+
 
 	cl_kernel initializeBuffersKernel, phase1, phase2;
 	initializeBuffersKernel = clCreateKernel(clProgram, "initializeBuffers", &status);
@@ -179,24 +138,16 @@ int main() {
 		printf("Error: %d while creating kernel initializeBuffers\n", status);
 		exit(status);
 	}
-	phase1					= clCreateKernel(clProgram, "phase1", &status);
+	phase1 = clCreateKernel(clProgram, "phase1", &status);
 	if (status != 0) {
 		printf("Error: %d while creating kernel phase1\n", status);
 		exit(status);
 	}
-	phase2					= clCreateKernel(clProgram, "phase2", &status);
+	phase2 = clCreateKernel(clProgram, "phase2", &status);
 	if (status != 0) {
 		printf("Error: %d while creating kernel phase2\n", status);
 		exit(status);
 	}
-
-	GraphData graph;
-	generateRandomGraph(&graph, 10, 3);
-	size_t maxWorkGroupSize;
-	clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, NULL);
-	size_t localWorkSize = maxWorkGroupSize;
-	size_t globalWorkSize = roundWorkSizeUp(localWorkSize, graph.vertexCount);
-
 
 	cl_mem vertexArrayDevice;
 	cl_mem edgeArrayDevice;
@@ -207,6 +158,7 @@ int main() {
 	cl_mem hostVertexArrayBuffer;
 	cl_mem hostEdgeArrayBuffer;
 	cl_mem hostWeightArrayBuffer;
+
 
 	hostVertexArrayBuffer =
 		clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR, sizeof(int)*graph.vertexCount, graph.vertexArray, &status);
@@ -288,10 +240,7 @@ int main() {
 
 
 
-
-
-
-	status =  clSetKernelArg(initializeBuffersKernel, 0, sizeof(cl_mem), &maskArrayDevice);
+	status = clSetKernelArg(initializeBuffersKernel, 0, sizeof(cl_mem), &maskArrayDevice);
 	status |= clSetKernelArg(initializeBuffersKernel, 1, sizeof(cl_mem), &costArrayDevice);
 	status |= clSetKernelArg(initializeBuffersKernel, 2, sizeof(cl_mem), &updatingCostArrayDevice);
 	// argment 3rd of the kernel we set later
@@ -327,48 +276,26 @@ int main() {
 	}
 
 
-	int *maskArrayHost = (int *)malloc(sizeof(int)*graph.vertexCount);
-	cl_int source = 0;
-	status = clSetKernelArg(initializeBuffersKernel, 3, sizeof(int), &source);
-	if (status != 0) {
-		printf("Error while setting the 3rd parameters of the initialization buffer kernel: %d\n", status);
-		exit(status);
-	}
-
-	status = clEnqueueNDRangeKernel(cmdQueue, initializeBuffersKernel, 1, NULL, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
-	if (status != 0) {
-		printf("Error while launching the kernel: %d\n", status);
-		exit(status);
-	}
 	
-	
-	cl_event readDone;
-	status = clEnqueueReadBuffer(cmdQueue, maskArrayDevice, CL_FALSE, 0, sizeof(int)*graph.vertexCount, maskArrayHost, 0, NULL, &readDone);
-	if (status != 0) {
-		printf("Error reading the buffer: %d\n", status);
-		exit(status);
-	}
-	status = clWaitForEvents(1, &readDone);
-	if (status != 0) {
-		printf("Error: %d\n", status);
-		exit(status);
-	}
 
-	while (!newShortestPathFound(maskArrayHost, graph.vertexCount)) {
-		printf("calling phase 1 and phase 2\n");
-		status = clEnqueueNDRangeKernel(cmdQueue, phase1, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+	for (int s = begin; s < end; s++) {
+		int *maskArrayHost = (int *)malloc(sizeof(int)*graph.vertexCount);
+		status = clSetKernelArg(initializeBuffersKernel, 3, sizeof(int), &s);
 		if (status != 0) {
-			printf("Error executing the first phase: %d\n", status);
+			printf("Error while setting the 3rd parameters of the initialization buffer kernel: %d\n", status);
 			exit(status);
 		}
-		status = clEnqueueNDRangeKernel(cmdQueue, phase2, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+
+		status = clEnqueueNDRangeKernel(cmdQueue, initializeBuffersKernel, 1, NULL, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
 		if (status != 0) {
-			printf("Error executing the second phase: %d\n", status);
+			printf("Error while launching the kernel: %d\n", status);
 			exit(status);
 		}
+
+		cl_event readDone;
 		status = clEnqueueReadBuffer(cmdQueue, maskArrayDevice, CL_FALSE, 0, sizeof(int)*graph.vertexCount, maskArrayHost, 0, NULL, &readDone);
 		if (status != 0) {
-			printf("Error: %d\n", status);
+			printf("Error reading the buffer: %d\n", status);
 			exit(status);
 		}
 		status = clWaitForEvents(1, &readDone);
@@ -376,23 +303,44 @@ int main() {
 			printf("Error: %d\n", status);
 			exit(status);
 		}
-	}
 
-	float *results = (float*)malloc(sizeof(float)* graph.vertexCount);
-	status = clEnqueueReadBuffer(cmdQueue, costArrayDevice, CL_FALSE, 0, sizeof(float)*graph.vertexCount, results, 0, NULL, &readDone);
-	if (status != 0) {
-		printf("Error: %d\n", status);
-		exit(status);
-	}
-	clWaitForEvents(1, &readDone);
-	for (int i = 0; i < graph.vertexCount; i++) {
-		printf("%f\t", results[i]);
-	}
-	printf("\n");
+		while (!newShortestPathFound(maskArrayHost, graph.vertexCount)) {
+			status = clEnqueueNDRangeKernel(cmdQueue, phase1, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+			if (status != 0) {
+				printf("Error executing the first phase: %d\n", status);
+				exit(status);
+			}
+			status = clEnqueueNDRangeKernel(cmdQueue, phase2, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+			if (status != 0) {
+				printf("Error executing the second phase: %d\n", status);
+				exit(status);
+			}
+			status = clEnqueueReadBuffer(cmdQueue, maskArrayDevice, CL_FALSE, 0, sizeof(int)*graph.vertexCount, maskArrayHost, 0, NULL, &readDone);
+			if (status != 0) {
+				printf("Error: %d\n", status);
+				exit(status);
+			}
+			status = clWaitForEvents(1, &readDone);
+			if (status != 0) {
+				printf("Error: %d\n", status);
+				exit(status);
+			}
+		}
 
-
-	//free host resources
-	clReleaseContext(context);
+		float *results = (float*)malloc(sizeof(float)* graph.vertexCount);
+		status = clEnqueueReadBuffer(cmdQueue, costArrayDevice, CL_FALSE, 0, sizeof(float)*graph.vertexCount, results, 0, NULL, &readDone);
+		if (status != 0) {
+			printf("Error: %d\n", status);
+			exit(status);
+		}
+		clWaitForEvents(1, &readDone);
+		for (int i = 0; i < graph.vertexCount; i++) {
+			printf("%f\t", results[i]);
+		}
+		printf("\n");
+		free(maskArrayHost);
+	}
+	free(programStr);
 	clReleaseCommandQueue(cmdQueue);
 	clReleaseProgram(clProgram);
 	clReleaseKernel(initializeBuffersKernel);
@@ -409,8 +357,149 @@ int main() {
 	clReleaseMemObject(hostEdgeArrayBuffer);
 	clReleaseMemObject(hostWeightArrayBuffer);
 
+}
+
+
+
+
+int main() {
+
+	cl_int status;
+	cl_uint numPlatforms = 0;
+	cl_uint numDevices = 0;
+	cl_platform_id *platforms = NULL;
+	cl_device_id   *devices = NULL;
+
+
+	// the number of platforms is retrieved by using a first call
+	// to clGetPlatformsIDs() with NULL argument as second argument
+	pthread_t *threadIDs = (pthread_t*)malloc(sizeof(pthread_t)* 2);
+	Arguments *args = (Arguments *)malloc(sizeof(Arguments)* 2);
+	cl_device_id *devicesToUse = (cl_device_id *)malloc(sizeof(cl_device_id)*2);
+	
+	
+	status = clGetPlatformIDs(0, NULL, &numPlatforms);
+	if (status != 0) {
+		printf("Status value %d\n",status);
+		exit(status);
+	}
+
+	// allocating memory for the platforms
+	platforms = (cl_platform_id *)malloc(numPlatforms * sizeof(cl_platform_id));
+	if (platforms == NULL) {
+		printf("Not enough memory\n");
+		exit(-1);
+	}
+	status = clGetPlatformIDs(numPlatforms, platforms, NULL);
+	if (status != 0) {
+		printf("Status value %d\n", status);
+		exit(status);
+	}
+
+
+	status = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+	if (status != 0) {
+		printf("Error %d while retrieving number of devices for platform %d\n", status, numPlatforms-1);
+		exit(-1);
+	}
+
+	// allocate space for devices
+	devices = (cl_device_id *)malloc(sizeof(cl_device_id)*numDevices);
+	if (devices == NULL) {
+		printf("Error allocating memory to store devices id for platform %d\n", numPlatforms-1);
+		exit(-1);
+	}
+	
+	status = clGetDeviceIDs(platforms[0], CL_DEVICE_TYPE_ALL, numDevices, devices, 0);
+	if (status != 0) {
+		printf("Error %d while retrieving number of devices for platform %d\n", status, numPlatforms - 1);
+		exit(-1);
+	}
+	
+	cl_context context1 = NULL;
+	context1 = clCreateContext(NULL, numDevices, devices, NULL, NULL, &status);
+	if (status != 0) {
+		printf("Error %d when creating the context in platform %d\n", status, numPlatforms - 1);
+		exit(status);
+	}
+
+	
+	
+
+	cl_device_id *devices2;
+	status = clGetDeviceIDs(platforms[2], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+	if (status != 0) {
+		printf("Error %d while retrieving number of devices for platform %d\n", status, numPlatforms - 1);
+		exit(-1);
+	}
+	devices2 = (cl_device_id *)malloc(sizeof(cl_device_id)*numDevices);
+	if (devices == NULL) {
+		printf("Error allocating memory to store devices id for platform %d\n", numPlatforms - 1);
+		exit(-1);
+	}
+	status = clGetDeviceIDs(platforms[2], CL_DEVICE_TYPE_ALL, numDevices, devices2, 0);
+	if (status != 0) {
+		printf("Error %d while retrieving number of devices for platform %d\n", status, numPlatforms - 1);
+		exit(-1);
+	}
+	
+	devicesToUse[0] = devices[1];
+	devicesToUse[1] = devices2[0];
+
+	GraphData graph;
+	generateRandomGraph(&graph, 10, 3);
+
+
+	
+
+	cl_context context2 = NULL;
+	context2 = clCreateContext(NULL, numDevices, devices2, NULL, NULL, &status);
+	if (status != 0) {
+		printf("Error %d when creating the context in platform %d\n", status, numPlatforms - 1);
+		exit(status);
+	}
+
+
+	args[0].begin = 0;
+	args[0].end = 4;
+	args[0].context = context1;
+	args[0].graph = graph;
+
+
+	args[1].begin = 5;
+	args[1].end = 9;
+	args[1].context = context2;
+	args[1].graph = graph;
+
+
+	// creating a command queue
+	
+	numDevices = 2;
+	for (unsigned int selectedDevice = 0; selectedDevice < numDevices; selectedDevice++) {
+		printf("%d selected device\n ", selectedDevice);
+		args[selectedDevice].device = (devicesToUse + selectedDevice);
+		pthread_create(&threadIDs[selectedDevice], NULL, (void* (*)(void*))dijkstra_thread, (void*)(args + selectedDevice));
+		//dijkstra_thread((Arguments *)(args + selectedDevice));
+	}
+
+
+
+	// Wait for the results from all threads
+	for (unsigned int selectedDevice = 0; selectedDevice < numDevices; selectedDevice++)
+	{
+		pthread_join(threadIDs[selectedDevice], NULL);
+	}
+	
+
+
+	while (true) {
+		;
+	}
+	//free host resources
+	clReleaseContext(context1);
+	clReleaseContext(context2);
 	free(devices);
 	free(platforms);
-	free(programStr);
+	
 	return 0;
 }
