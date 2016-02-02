@@ -204,11 +204,10 @@ int main() {
 	cl_mem maskArrayDevice;
 	cl_mem costArrayDevice;
 	cl_mem updatingCostArrayDevice;
-
-	cl_int errNum;
 	cl_mem hostVertexArrayBuffer;
 	cl_mem hostEdgeArrayBuffer;
 	cl_mem hostWeightArrayBuffer;
+
 	hostVertexArrayBuffer =
 		clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR, sizeof(int)*graph.vertexCount, graph.vertexArray, &status);
 	if (status != 0) {
@@ -286,9 +285,6 @@ int main() {
 		printf("Error: %d\n", status);
 		exit(status);
 	}
-	clReleaseMemObject(hostVertexArrayBuffer);
-	clReleaseMemObject(hostEdgeArrayBuffer);
-	clReleaseMemObject(hostWeightArrayBuffer);
 
 
 
@@ -394,10 +390,6 @@ int main() {
 	}
 	printf("\n");
 
-	while (true) {
-		;
-	}
-
 
 	//free host resources
 	clReleaseContext(context);
@@ -406,6 +398,17 @@ int main() {
 	clReleaseKernel(initializeBuffersKernel);
 	clReleaseKernel(phase1);
 	clReleaseKernel(phase2);
+
+	clReleaseMemObject(vertexArrayDevice);
+	clReleaseMemObject(edgeArrayDevice);
+	clReleaseMemObject(weightArrayDevice);
+	clReleaseMemObject(maskArrayDevice);
+	clReleaseMemObject(costArrayDevice);
+	clReleaseMemObject(updatingCostArrayDevice);
+	clReleaseMemObject(hostVertexArrayBuffer);
+	clReleaseMemObject(hostEdgeArrayBuffer);
+	clReleaseMemObject(hostWeightArrayBuffer);
+
 	free(devices);
 	free(platforms);
 	free(programStr);
