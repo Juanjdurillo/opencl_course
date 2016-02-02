@@ -25,27 +25,30 @@ int main() {
 	cl_platform_id *platforms = NULL;
 	cl_device_id   *devices = NULL;
 	cl_mem bufferA, bufferB, bufferC;
-	int *A = NULL; // input array
-	int *B = NULL; // input array
-	int *C = NULL; // output array
+	float *A = NULL; // input array
+	float *B = NULL; // input array
+	float *C = NULL; // output array
 
 	//Elements in each array
-	const int elements = 8;
+	const int elements = 16;
 
 	//size of the data
-	size_t datasize = sizeof(int)*elements;
+	size_t datasize = sizeof(float)*elements*elements;
 
 	// Allocate space for input/output data
-	A = (int *)malloc(datasize);
-	B = (int *)malloc(datasize);
-	C = (int *)malloc(datasize);
+	A = (float *)malloc(datasize);
+	B = (float *)malloc(datasize);
+	C = (float *)malloc(datasize);
 
-	// Initialize the input data
-	for (int i = 0; i < elements; i++)  {
-		A[i] = i;
-		B[i] = i;
+	// Initialize the input matrices
+	for (int i = 0; i < elements*elements; i++)  {
+		A[i] = 1.0*i;
+		B[i] = 0.0;
 	}
-
+	B[0] = 1;
+	for (int i = elements+1; i < elements*elements; i=i+elements+1)  {
+		B[i] = 1.0;
+	}
 
 	// the number of platforms is retrieved by using a first call
 	// to clGetPlatformsIDs() with NULL argument as second argument
@@ -140,7 +143,7 @@ int main() {
 	}
 
 	cl_kernel clKernel;
-	clKernel = clCreateKernel(clProgram, "vecadd", &status);
+	clKernel = clCreateKernel(clProgram, "matrixMul", &status);
 	if (status != 0) {
 		printf("Error when selecting the kernel to execute: %d\n", status);
 		exit(status);
@@ -177,20 +180,26 @@ int main() {
 	}
 
 	//we need to set the parameters for the kernel
-	status = clSetKernelArg(clKernel, 0, sizeof(cl_mem), &bufferA);
-	status |= clSetKernelArg(clKernel, 1, sizeof(cl_mem), &bufferB);
-	status |= clSetKernelArg(clKernel, 2, sizeof(cl_mem), &bufferC);
+	status = clSetKernelArg(clKernel, 0, sizeof(cl_mem), &bufferC);
+	status |= clSetKernelArg(clKernel, 1, sizeof(cl_mem), &bufferA);
+	status |= clSetKernelArg(clKernel, 2, sizeof(cl_mem), &bufferB);
+	status |= clSetKernelArg(clKernel, 3, sizeof(int), (void *)&elements);
+	status |= clSetKernelArg(clKernel, 4, sizeof(int), (void *)&elements);
 	if (status != 0) {
 		printf("Error when setting the parameters of the kernel\n");
 		exit(-1);
 	}
 
-	size_t globalWorkSize[1];
-	size_t localWorkSize[1];
-	globalWorkSize[0] = 8;
-	localWorkSize[0] = 8;
+	size_t globalWorkSize[2];
+	size_t localWorkSize[2];
 
-	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 1, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
+	globalWorkSize[0] = elements;
+	globalWorkSize[1] = elements;
+
+	localWorkSize[0] = 16;
+	localWorkSize[1] = 16;
+
+	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 2, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
 	if (status != 0) {
 		printf("Errror %d when enqueuing the kernel for execution",status);
 		exit(status);
@@ -199,8 +208,10 @@ int main() {
 	status = clEnqueueReadBuffer(cmdQueue, bufferC, CL_TRUE, 0, datasize, C, 0, NULL, NULL);
 	
 	for (int i = 0; i < elements; i++) {
-		printf("%d\n", C[i]);
+		printf("%f\n", C[i]);
 	}
+
+
 
 	//free host resources
 	clReleaseContext(context);
