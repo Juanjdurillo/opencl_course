@@ -3,6 +3,60 @@
 #include <CL/cl.h>
 
 #define FILE_MAX_LENGTH 1000000
+
+typedef struct
+{
+	int *vertexArray;	// vertexes
+	int vertexCount;	// #vertexes
+	int *edgeArray;		// edges
+	int edgeCount;		// #edges
+	float *weightArray;	// weights
+} GraphData;
+
+
+int roundWorkSizeUp(int groupSize, int globalSize)
+{
+	int remainder = globalSize % groupSize;
+	if (remainder == 0)
+	{
+		return globalSize;
+	}
+	else
+	{
+		return globalSize + groupSize - remainder;
+	}
+}
+
+void generateRandomGraph(GraphData *graph, int numVertexes, int neighborsPerVertex)
+{
+	graph->vertexCount = numVertexes;
+	graph->vertexArray = (int *)malloc(sizeof(int)*numVertexes);
+	graph->edgeCount = numVertexes * neighborsPerVertex;
+	graph->edgeArray = (int *)malloc(sizeof(int)*graph->edgeCount);
+	graph->weightArray = (float *)malloc(sizeof(float)* graph->edgeCount);
+
+
+	for (int i = 0; i < graph->vertexCount; i++)
+	{
+		graph->vertexArray[i] = i * neighborsPerVertex;
+	}
+
+	for (int i = 0; i < graph->edgeCount; i++)
+	{
+		graph->edgeArray[i] = (rand() % graph->vertexCount);
+		graph->weightArray[i] = (float)(rand() % 1000) / 1000.0f;
+	}
+
+}
+
+bool newShortestPathFound(int *maskArray, int count) {
+	for (int i = 0; i < count; i++) {
+		if (maskArray[i] == 1)
+			return false;
+	}
+	return true;
+}
+
 char *createProgramFromFile(const char*fileName, size_t *sourceSize) {
 	//const char fileName[] = "matrixmul2.cl";
 	char *source_str;
@@ -24,31 +78,7 @@ int main() {
 	cl_uint numDevices = 0;
 	cl_platform_id *platforms = NULL;
 	cl_device_id   *devices = NULL;
-	cl_mem bufferA, bufferB, bufferC;
-	float *A = NULL; // input array
-	float *B = NULL; // input array
-	float *C = NULL; // output array
 
-	//Elements in each array
-	const int elements = 16;
-
-	//size of the data
-	size_t datasize = sizeof(float)*elements*elements;
-
-	// Allocate space for input/output data
-	A = (float *)malloc(datasize);
-	B = (float *)malloc(datasize);
-	C = (float *)malloc(datasize);
-
-	// Initialize the input matrices
-	for (int i = 0; i < elements*elements; i++)  {
-		A[i] = 1.0*i;
-		B[i] = 0.0;
-	}
-	B[0] = 1;
-	for (int i = elements+1; i < elements*elements; i=i+elements+1)  {
-		B[i] = 1.0;
-	}
 
 	// the number of platforms is retrieved by using a first call
 	// to clGetPlatformsIDs() with NULL argument as second argument
@@ -141,91 +171,243 @@ int main() {
 		printf("%s\n", log);
 		exit(status);
 	}
+	
 
-	cl_kernel clKernel;
-	clKernel = clCreateKernel(clProgram, "matrixMul2", &status);
+	cl_kernel initializeBuffersKernel, phase1, phase2;
+	initializeBuffersKernel = clCreateKernel(clProgram, "initializeBuffers", &status);
 	if (status != 0) {
-		printf("Error when selecting the kernel to execute: %d\n", status);
+		printf("Error: %d while creating kernel initializeBuffers\n", status);
+		exit(status);
+	}
+	phase1					= clCreateKernel(clProgram, "phase1", &status);
+	if (status != 0) {
+		printf("Error: %d while creating kernel phase1\n", status);
+		exit(status);
+	}
+	phase2					= clCreateKernel(clProgram, "phase2", &status);
+	if (status != 0) {
+		printf("Error: %d while creating kernel phase2\n", status);
 		exit(status);
 	}
 
-	bufferA = clCreateBuffer(context, CL_MEM_READ_ONLY, datasize, NULL, &status);
+	GraphData graph;
+	generateRandomGraph(&graph, 10, 3);
+	size_t maxWorkGroupSize;
+	clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, NULL);
+	size_t localWorkSize = maxWorkGroupSize;
+	size_t globalWorkSize = roundWorkSizeUp(localWorkSize, graph.vertexCount);
+
+
+	cl_mem vertexArrayDevice;
+	cl_mem edgeArrayDevice;
+	cl_mem weightArrayDevice;
+	cl_mem maskArrayDevice;
+	cl_mem costArrayDevice;
+	cl_mem updatingCostArrayDevice;
+
+	cl_int errNum;
+	cl_mem hostVertexArrayBuffer;
+	cl_mem hostEdgeArrayBuffer;
+	cl_mem hostWeightArrayBuffer;
+	hostVertexArrayBuffer =
+		clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR, sizeof(int)*graph.vertexCount, graph.vertexArray, &status);
 	if (status != 0) {
-		printf("Error %d when creating a memory buffer\n",status);
+		printf("Error: %d\n", status);
 		exit(status);
 	}
-	bufferB = clCreateBuffer(context, CL_MEM_READ_ONLY, datasize, NULL, &status);
+
+	hostEdgeArrayBuffer =
+		clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR, sizeof(int)*graph.edgeCount, graph.edgeArray, &status);
 	if (status != 0) {
-		printf("Error %d when creating a memory buffer\n", status);
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+
+	hostWeightArrayBuffer =
+		clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_ALLOC_HOST_PTR, sizeof(float)*graph.edgeCount, graph.weightArray, &status);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+
+	vertexArrayDevice =
+		clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(int)* globalWorkSize, NULL, &status);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	edgeArrayDevice =
+		clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(int)* graph.edgeCount, NULL, &status);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	weightArrayDevice =
+		clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float)* graph.edgeCount, NULL, &status);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	maskArrayDevice =
+		clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int)* globalWorkSize, NULL, &status);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	costArrayDevice =
+		clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float)* globalWorkSize, NULL, &status);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	updatingCostArrayDevice =
+		clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float)* globalWorkSize, NULL, &status);
+
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	status = clEnqueueCopyBuffer(cmdQueue, hostVertexArrayBuffer, vertexArrayDevice, 0, 0,
+		sizeof(int)* graph.vertexCount, 0, NULL, NULL);
+
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	status = clEnqueueCopyBuffer(cmdQueue, hostEdgeArrayBuffer, edgeArrayDevice, 0, 0,
+		sizeof(int)* graph.edgeCount, 0, NULL, NULL);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	status = clEnqueueCopyBuffer(cmdQueue, hostWeightArrayBuffer, weightArrayDevice, 0, 0,
+		sizeof(float)* graph.edgeCount, 0, NULL, NULL);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+	clReleaseMemObject(hostVertexArrayBuffer);
+	clReleaseMemObject(hostEdgeArrayBuffer);
+	clReleaseMemObject(hostWeightArrayBuffer);
+
+
+
+
+
+
+	status =  clSetKernelArg(initializeBuffersKernel, 0, sizeof(cl_mem), &maskArrayDevice);
+	status |= clSetKernelArg(initializeBuffersKernel, 1, sizeof(cl_mem), &costArrayDevice);
+	status |= clSetKernelArg(initializeBuffersKernel, 2, sizeof(cl_mem), &updatingCostArrayDevice);
+	// argment 3rd of the kernel we set later
+	status |= clSetKernelArg(initializeBuffersKernel, 4, sizeof(int), &graph.vertexCount);
+	if (status != 0) {
+		printf("Error while setting the parameters of the initializingBufferKernel: %d\n", status);
+		exit(status);
+	}
+
+	status = clSetKernelArg(phase1, 0, sizeof(cl_mem), &vertexArrayDevice);
+	status |= clSetKernelArg(phase1, 1, sizeof(cl_mem), &edgeArrayDevice);
+	status |= clSetKernelArg(phase1, 2, sizeof(cl_mem), &weightArrayDevice);
+	status |= clSetKernelArg(phase1, 3, sizeof(cl_mem), &maskArrayDevice);
+	status |= clSetKernelArg(phase1, 4, sizeof(cl_mem), &costArrayDevice);
+	status |= clSetKernelArg(phase1, 5, sizeof(cl_mem), &updatingCostArrayDevice);
+	status |= clSetKernelArg(phase1, 6, sizeof(int), &graph.vertexCount);
+	status |= clSetKernelArg(phase1, 7, sizeof(int), &graph.edgeCount);
+	if (status != 0) {
+		printf("Error while setting the parameters of the first phase kernel: %d\n", status);
+		exit(status);
+	}
+
+	status = clSetKernelArg(phase2, 0, sizeof(cl_mem), &vertexArrayDevice);
+	status |= clSetKernelArg(phase2, 1, sizeof(cl_mem), &edgeArrayDevice);
+	status |= clSetKernelArg(phase2, 2, sizeof(cl_mem), &weightArrayDevice);
+	status |= clSetKernelArg(phase2, 3, sizeof(cl_mem), &maskArrayDevice);
+	status |= clSetKernelArg(phase2, 4, sizeof(cl_mem), &costArrayDevice);
+	status |= clSetKernelArg(phase2, 5, sizeof(cl_mem), &updatingCostArrayDevice);
+	status |= clSetKernelArg(phase2, 6, sizeof(int), &graph.vertexCount);
+	if (status != 0) {
+		printf("Error while setting the parameters of the second phase kernel: %d\n", status);
+		exit(status);
+	}
+
+
+	int *maskArrayHost = (int *)malloc(sizeof(int)*graph.vertexCount);
+	cl_int source = 0;
+	status = clSetKernelArg(initializeBuffersKernel, 3, sizeof(int), &source);
+	if (status != 0) {
+		printf("Error while setting the 3rd parameters of the initialization buffer kernel: %d\n", status);
+		exit(status);
+	}
+
+	status = clEnqueueNDRangeKernel(cmdQueue, initializeBuffersKernel, 1, NULL, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+	if (status != 0) {
+		printf("Error while launching the kernel: %d\n", status);
 		exit(status);
 	}
 	
-	bufferC = clCreateBuffer(context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
-	if (status != 0) {
-		printf("Error %d when creating a memory buffer\n", status);
-		exit(status);
-	}
-
-	// write data from the host to the device 
-	status = clEnqueueWriteBuffer(cmdQueue, bufferA, CL_FALSE, 0, datasize, A, 0, NULL, NULL);
-	if (status != 0) {
-		printf("Error %d when writing information into the device\n", status);
-		exit(status);
-	}
 	
-	status = clEnqueueWriteBuffer(cmdQueue, bufferB, CL_FALSE, 0, datasize, B, 0, NULL, NULL);
+	cl_event readDone;
+	status = clEnqueueReadBuffer(cmdQueue, maskArrayDevice, CL_FALSE, 0, sizeof(int)*graph.vertexCount, maskArrayHost, 0, NULL, &readDone);
 	if (status != 0) {
-		printf("Error %d when writing information into the device\n", status);
+		printf("Error reading the buffer: %d\n", status);
+		exit(status);
+	}
+	status = clWaitForEvents(1, &readDone);
+	if (status != 0) {
+		printf("Error: %d\n", status);
 		exit(status);
 	}
 
-	//we need to set the parameters for the kernel
-	status = clSetKernelArg(clKernel, 0, sizeof(cl_mem), &bufferC);
-	status |= clSetKernelArg(clKernel, 1, sizeof(cl_mem), &bufferA);
-	status |= clSetKernelArg(clKernel, 2, sizeof(cl_mem), &bufferB);
-	status |= clSetKernelArg(clKernel, 3, sizeof(int), (void *)&elements);
-	status |= clSetKernelArg(clKernel, 4, sizeof(int), (void *)&elements);
-	if (status != 0) {
-		printf("Error when setting the parameters of the kernel\n");
-		exit(-1);
+	while (!newShortestPathFound(maskArrayHost, graph.vertexCount)) {
+		printf("calling phase 1 and phase 2\n");
+		status = clEnqueueNDRangeKernel(cmdQueue, phase1, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+		if (status != 0) {
+			printf("Error executing the first phase: %d\n", status);
+			exit(status);
+		}
+		status = clEnqueueNDRangeKernel(cmdQueue, phase2, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+		if (status != 0) {
+			printf("Error executing the second phase: %d\n", status);
+			exit(status);
+		}
+		status = clEnqueueReadBuffer(cmdQueue, maskArrayDevice, CL_FALSE, 0, sizeof(int)*graph.vertexCount, maskArrayHost, 0, NULL, &readDone);
+		if (status != 0) {
+			printf("Error: %d\n", status);
+			exit(status);
+		}
+		status = clWaitForEvents(1, &readDone);
+		if (status != 0) {
+			printf("Error: %d\n", status);
+			exit(status);
+		}
 	}
 
-	size_t globalWorkSize[2];
-	size_t localWorkSize[2];
-
-	globalWorkSize[0] = elements;
-	globalWorkSize[1] = elements;
-
-	localWorkSize[0] = 8;
-	localWorkSize[1] = 8;
-
-	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 2, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
+	float *results = (float*)malloc(sizeof(float)* graph.vertexCount);
+	status = clEnqueueReadBuffer(cmdQueue, costArrayDevice, CL_FALSE, 0, sizeof(float)*graph.vertexCount, results, 0, NULL, &readDone);
 	if (status != 0) {
-		printf("Errror %d when enqueuing the kernel for execution",status);
+		printf("Error: %d\n", status);
 		exit(status);
 	}
-
-	status = clEnqueueReadBuffer(cmdQueue, bufferC, CL_TRUE, 0, datasize, C, 0, NULL, NULL);
-	
-	for (int i = 0; i < elements; i++) {
-		printf("%f\n", C[i]);
+	clWaitForEvents(1, &readDone);
+	for (int i = 0; i < graph.vertexCount; i++) {
+		printf("%f\t", results[i]);
 	}
+	printf("\n");
 
+	while (true) {
+		;
+	}
 
 
 	//free host resources
 	clReleaseContext(context);
 	clReleaseCommandQueue(cmdQueue);
 	clReleaseProgram(clProgram);
-	clReleaseKernel(clKernel);
-	clReleaseMemObject(bufferA);
-	clReleaseMemObject(bufferB);
-	clReleaseMemObject(bufferC);
+	clReleaseKernel(initializeBuffersKernel);
+	clReleaseKernel(phase1);
+	clReleaseKernel(phase2);
 	free(devices);
 	free(platforms);
 	free(programStr);
-	free(A);
-	free(B);
-	free(C);
 	return 0;
 }
