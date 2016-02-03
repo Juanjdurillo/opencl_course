@@ -131,6 +131,37 @@ int main() {
 	globalWorkSize[0] = 8;
 	localWorkSize[0] = 8;
 
+	size_t size = 8 * sizeof(float);
+
+	float* p =(float *) clSVMAlloc(
+
+		context,            // an OpenCL context where this buffer is available
+
+		CL_MEM_READ_ONLY,   // access mode for the kernel and other options; here
+		// only read-only access is required
+
+		size,               // amount of memory to allocate (in bytes)
+
+		0                   // alignment in bytes (0 means default)
+		);
+
+	if (p == NULL) {
+		printf("Error when allocating SVM memory");
+		exit(-1);
+	}
+
+
+	for (unsigned int i = 0; i < 8; i++) {
+		p[i] = 1.0 * i;
+	}
+
+
+	status = clSetKernelArgSVMPointer(clKernel, 0, p);
+	if (status != 0) {
+		printf("Error %d when setting a SVM buffer as argument of a kernel\n",status);
+		exit(status);
+	}
+
 	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 1, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
 	if (status != 0) {
 		printf("Errror %d when enqueuing the kernel for execution",status);
