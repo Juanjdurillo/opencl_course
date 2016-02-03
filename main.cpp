@@ -61,23 +61,36 @@ int main() {
 		//we obtain them althoug so far we do nothing with them
 		status = clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, numDevices, devices, 0);
 
+
+		cl_device_svm_capabilities caps;
+
+		cl_int err = clGetDeviceInfo(
+			devices[0],
+			CL_DEVICE_SVM_CAPABILITIES,
+			sizeof(cl_device_svm_capabilities),
+			&caps,
+			0
+			);
+
 		
-		char buffer[10240];
-		printf("  Information about platform -- %d --\n", i);
-		printf("The platform has %d devices \n",numDevices);
-		clGetPlatformInfo(platforms[i], CL_PLATFORM_PROFILE, 10240, buffer, NULL);
-		printf("  PROFILE = %s\n", buffer);
-		clGetPlatformInfo(platforms[i], CL_PLATFORM_VERSION, 10240, buffer, NULL);
-		printf("  VERSION = %s\n", buffer);
-		clGetPlatformInfo(platforms[i], CL_PLATFORM_NAME, 10240, buffer, NULL);
-		printf("  NAME = %s\n", buffer);
-		clGetPlatformInfo(platforms[i], CL_PLATFORM_VENDOR, 10240, buffer, NULL);
-		printf("  VENDOR = %s\n", buffer);
-		clGetPlatformInfo(platforms[i], CL_PLATFORM_EXTENSIONS, 10240, buffer, NULL);
-		printf("  EXTENSIONS = %s\n", buffer);
-		free(devices);
+		if (err == CL_SUCCESS && (caps & CL_DEVICE_SVM_FINE_GRAIN_SYSTEM) && (caps & CL_DEVICE_SVM_ATOMICS))
+			printf("Fine-grained system with atomics\n");
+		else if (err == CL_SUCCESS && (caps & CL_DEVICE_SVM_FINE_GRAIN_SYSTEM))
+			printf("Fine-grained system\n");
+		else if (err == CL_SUCCESS && (caps & CL_DEVICE_SVM_FINE_GRAIN_BUFFER) && (caps & CL_DEVICE_SVM_ATOMICS))
+			printf("Fine-grained buffer with atomics\n");
+		else if (err == CL_SUCCESS && (caps & CL_DEVICE_SVM_FINE_GRAIN_BUFFER))
+			printf("Fine-grained buffer\n");
+		//else if (err == CL_SUCCESS && (caps & CL_DEVICE_SVM_COARSE_GRAIN))
+		//	printf("Coarse-grained buffer\n");
+		else
+			printf("No support \n");
+	
 	}
 
+	while (true) {
+		;
+	}
 
 	//free host resources	
 	free(platforms);
