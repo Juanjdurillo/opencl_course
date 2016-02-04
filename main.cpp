@@ -106,7 +106,7 @@ int main() {
 		exit(status);
 	}
 
-	status = clGetDeviceIDs(platforms[numPlatforms-1], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+	status = clGetDeviceIDs(platforms[2], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
 	if (status != 0) {
 		printf("Error %d while retrieving number of devices for platform %d\n", status, numPlatforms-1);
 		exit(-1);
@@ -120,7 +120,7 @@ int main() {
 	}
 
 	//we obtain them althoug so far we do nothing with them
-	status = clGetDeviceIDs(platforms[numPlatforms-1], CL_DEVICE_TYPE_ALL, numDevices, devices, 0);
+	status = clGetDeviceIDs(platforms[2], CL_DEVICE_TYPE_ALL, numDevices, devices, 0);
 	if (status != 0) {
 		printf("Error %d when obtaining devices on platform %d\n", status, numPlatforms - 1);
 		exit(status);
@@ -149,9 +149,25 @@ int main() {
 		exit(status);
 	}
 
+	
+	
+	cl_queue_properties qprop2[] = {CL_QUEUE_PROPERTIES,
+		(cl_command_queue_properties)CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_ON_DEVICE | CL_QUEUE_ON_DEVICE_DEFAULT, 0 };
+
+	//cl_command_queue my_device_q = clCreateCommandQueueWithProperties(CLU_CONTEXT, cluGetDevice(CL_DEVICE_TYPE_GPU), qprop, &status);
+	cl_command_queue my_device;
+	my_device = clCreateCommandQueueWithProperties(context, devices[0], qprop2, &status);
+	if (status != 0) {
+		printf("Error when creating the program from the sources %d\n", status);
+		exit(status);
+	}
+	
+	
+	
 	// creating the program
 	size_t sourceSize;
 	char * programStr = createProgramFromFile("Kernels.cl",&sourceSize);
+	const char * options = "-cl-std=CL2.0 -D CL_VERSION_2_0";
 
 	cl_program clProgram;
 	clProgram = clCreateProgramWithSource(context, 1, (const char **)&programStr, (const size_t*)&sourceSize, &status);
@@ -159,7 +175,7 @@ int main() {
 		printf("Error when creating the program from the sources %d\n", status);
 		exit(status);
 	}
-	status = clBuildProgram(clProgram, 0, NULL, NULL, NULL, NULL);
+	status = clBuildProgram(clProgram, 0, NULL, options, NULL, NULL);
 	if (status != 0) {
 		printf("Error when compiling the opencl code: %d\n", status);
 		// Allocate memory for the log
@@ -173,18 +189,15 @@ int main() {
 	}
 	
 
-	cl_kernel initializeBuffersKernel, phase1, phase2;
+	cl_kernel initializeBuffersKernel;
 	initializeBuffersKernel = clCreateKernel(clProgram, "initializeBuffers", &status);
 	if (status != 0) {
 		printf("Error: %d while creating kernel initializeBuffers\n", status);
 		exit(status);
 	}
-	phase1					= clCreateKernel(clProgram, "phase1", &status);
-	if (status != 0) {
-		printf("Error: %d while creating kernel phase1\n", status);
-		exit(status);
-	}
-	phase2					= clCreateKernel(clProgram, "phase2", &status);
+
+	cl_kernel phase3;
+	phase3 = clCreateKernel(clProgram, "phase3", &status);
 	if (status != 0) {
 		printf("Error: %d while creating kernel phase2\n", status);
 		exit(status);
@@ -301,30 +314,21 @@ int main() {
 		exit(status);
 	}
 
-	status = clSetKernelArg(phase1, 0, sizeof(cl_mem), &vertexArrayDevice);
-	status |= clSetKernelArg(phase1, 1, sizeof(cl_mem), &edgeArrayDevice);
-	status |= clSetKernelArg(phase1, 2, sizeof(cl_mem), &weightArrayDevice);
-	status |= clSetKernelArg(phase1, 3, sizeof(cl_mem), &maskArrayDevice);
-	status |= clSetKernelArg(phase1, 4, sizeof(cl_mem), &costArrayDevice);
-	status |= clSetKernelArg(phase1, 5, sizeof(cl_mem), &updatingCostArrayDevice);
-	status |= clSetKernelArg(phase1, 6, sizeof(int), &graph.vertexCount);
-	status |= clSetKernelArg(phase1, 7, sizeof(int), &graph.edgeCount);
+
+
+	status = clSetKernelArg(phase3, 0, sizeof(cl_mem), &vertexArrayDevice);
+	status |= clSetKernelArg(phase3, 1, sizeof(cl_mem), &edgeArrayDevice);
+	status |= clSetKernelArg(phase3, 2, sizeof(cl_mem), &weightArrayDevice);
+	status |= clSetKernelArg(phase3, 3, sizeof(cl_mem), &maskArrayDevice);
+	status |= clSetKernelArg(phase3, 4, sizeof(cl_mem), &costArrayDevice);
+	status |= clSetKernelArg(phase3, 5, sizeof(cl_mem), &updatingCostArrayDevice);
+	//status |= clSetKernelArg(phase3, 6, sizeof(int), &graph.vertexCount);
+	//status |= clSetKernelArg(phase3, 7, sizeof(int), &graph.edgeCount);
 	if (status != 0) {
-		printf("Error while setting the parameters of the first phase kernel: %d\n", status);
+		printf("Error while setting the parameters of the first phase kerne3l: %d\n", status);
 		exit(status);
 	}
 
-	status = clSetKernelArg(phase2, 0, sizeof(cl_mem), &vertexArrayDevice);
-	status |= clSetKernelArg(phase2, 1, sizeof(cl_mem), &edgeArrayDevice);
-	status |= clSetKernelArg(phase2, 2, sizeof(cl_mem), &weightArrayDevice);
-	status |= clSetKernelArg(phase2, 3, sizeof(cl_mem), &maskArrayDevice);
-	status |= clSetKernelArg(phase2, 4, sizeof(cl_mem), &costArrayDevice);
-	status |= clSetKernelArg(phase2, 5, sizeof(cl_mem), &updatingCostArrayDevice);
-	status |= clSetKernelArg(phase2, 6, sizeof(int), &graph.vertexCount);
-	if (status != 0) {
-		printf("Error while setting the parameters of the second phase kernel: %d\n", status);
-		exit(status);
-	}
 
 
 	int *maskArrayHost = (int *)malloc(sizeof(int)*graph.vertexCount);
@@ -354,30 +358,13 @@ int main() {
 		exit(status);
 	}
 
-	while (!newShortestPathFound(maskArrayHost, graph.vertexCount)) {
-		printf("calling phase 1 and phase 2\n");
-		status = clEnqueueNDRangeKernel(cmdQueue, phase1, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+		printf("calling phase 3 \n");
+		status = clEnqueueNDRangeKernel(cmdQueue, phase3, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
 		if (status != 0) {
 			printf("Error executing the first phase: %d\n", status);
 			exit(status);
 		}
-		status = clEnqueueNDRangeKernel(cmdQueue, phase2, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
-		if (status != 0) {
-			printf("Error executing the second phase: %d\n", status);
-			exit(status);
-		}
-		status = clEnqueueReadBuffer(cmdQueue, maskArrayDevice, CL_FALSE, 0, sizeof(int)*graph.vertexCount, maskArrayHost, 0, NULL, &readDone);
-		if (status != 0) {
-			printf("Error: %d\n", status);
-			exit(status);
-		}
-		status = clWaitForEvents(1, &readDone);
-		if (status != 0) {
-			printf("Error: %d\n", status);
-			exit(status);
-		}
-	}
-
+	
 	float *results = (float*)malloc(sizeof(float)* graph.vertexCount);
 	status = clEnqueueReadBuffer(cmdQueue, costArrayDevice, CL_FALSE, 0, sizeof(float)*graph.vertexCount, results, 0, NULL, &readDone);
 	if (status != 0) {
@@ -396,8 +383,6 @@ int main() {
 	clReleaseCommandQueue(cmdQueue);
 	clReleaseProgram(clProgram);
 	clReleaseKernel(initializeBuffersKernel);
-	clReleaseKernel(phase1);
-	clReleaseKernel(phase2);
 
 	clReleaseMemObject(vertexArrayDevice);
 	clReleaseMemObject(edgeArrayDevice);
