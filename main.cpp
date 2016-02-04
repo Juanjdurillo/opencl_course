@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <CL/cl.h>
-
+#include <atomic>
 #define FILE_MAX_LENGTH 1000000
 
 typedef struct
@@ -204,11 +204,11 @@ int main() {
 	}
 
 	GraphData graph;
-	generateRandomGraph(&graph, 10, 3);
+	generateRandomGraph(&graph, 100, 30);
 	size_t maxWorkGroupSize;
-	clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, NULL);
-	size_t localWorkSize = maxWorkGroupSize;
-	size_t globalWorkSize = roundWorkSizeUp(localWorkSize, graph.vertexCount);
+	//clGetDeviceInfo(devices[0], CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t), &maxWorkGroupSize, NULL);
+	size_t localWorkSize = graph.vertexCount;// maxWorkGroupSize;
+	size_t globalWorkSize = graph.vertexCount;// roundWorkSizeUp(localWorkSize, graph.vertexCount);
 
 
 	cl_mem vertexArrayDevice;
@@ -308,22 +308,32 @@ int main() {
 	status |= clSetKernelArg(initializeBuffersKernel, 1, sizeof(cl_mem), &costArrayDevice);
 	status |= clSetKernelArg(initializeBuffersKernel, 2, sizeof(cl_mem), &updatingCostArrayDevice);
 	// argment 3rd of the kernel we set later
-	status |= clSetKernelArg(initializeBuffersKernel, 4, sizeof(int), &graph.vertexCount);
+	//status |= clSetKernelArg(initializeBuffersKernel, 4, sizeof(int), &graph.vertexCount);
 	if (status != 0) {
 		printf("Error while setting the parameters of the initializingBufferKernel: %d\n", status);
 		exit(status);
 	}
 
 
+	std::atomic_uint value;
+	std::atomic_store(&value, 1);
+
+	cl_mem buffer =
+		clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(std::atomic_uint), NULL, &status);
+	if (status != 0) {
+		printf("Error: %d\n", status);
+		exit(status);
+	}
+
+	clEnqueueWriteBuffer(cmdQueue, buffer, CL_TRUE, 0,sizeof(std::atomic_uint), &value,0,NULL,NULL);
 
 	status = clSetKernelArg(phase3, 0, sizeof(cl_mem), &vertexArrayDevice);
 	status |= clSetKernelArg(phase3, 1, sizeof(cl_mem), &edgeArrayDevice);
 	status |= clSetKernelArg(phase3, 2, sizeof(cl_mem), &weightArrayDevice);
-	status |= clSetKernelArg(phase3, 3, sizeof(cl_mem), &maskArrayDevice);
-	status |= clSetKernelArg(phase3, 4, sizeof(cl_mem), &costArrayDevice);
-	status |= clSetKernelArg(phase3, 5, sizeof(cl_mem), &updatingCostArrayDevice);
-	//status |= clSetKernelArg(phase3, 6, sizeof(int), &graph.vertexCount);
-	//status |= clSetKernelArg(phase3, 7, sizeof(int), &graph.edgeCount);
+	status |= clSetKernelArg(phase3, 5, sizeof(cl_mem), &maskArrayDevice);
+	status |= clSetKernelArg(phase3, 3, sizeof(cl_mem), &costArrayDevice);
+	status |= clSetKernelArg(phase3, 4, sizeof(cl_mem), &updatingCostArrayDevice);
+	status |= clSetKernelArg(phase3, 6, sizeof(cl_mem), &buffer);
 	if (status != 0) {
 		printf("Error while setting the parameters of the first phase kerne3l: %d\n", status);
 		exit(status);
@@ -338,32 +348,25 @@ int main() {
 		printf("Error while setting the 3rd parameters of the initialization buffer kernel: %d\n", status);
 		exit(status);
 	}
-
-	status = clEnqueueNDRangeKernel(cmdQueue, initializeBuffersKernel, 1, NULL, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+	cl_event readDone;
+	status = clEnqueueNDRangeKernel(cmdQueue, initializeBuffersKernel, 1, NULL, &globalWorkSize, &localWorkSize, 0, NULL, &readDone);
 	if (status != 0) {
 		printf("Error while launching the kernel: %d\n", status);
 		exit(status);
 	}
 	
-	
-	cl_event readDone;
-	status = clEnqueueReadBuffer(cmdQueue, maskArrayDevice, CL_FALSE, 0, sizeof(int)*graph.vertexCount, maskArrayHost, 0, NULL, &readDone);
-	if (status != 0) {
-		printf("Error reading the buffer: %d\n", status);
-		exit(status);
-	}
 	status = clWaitForEvents(1, &readDone);
 	if (status != 0) {
 		printf("Error: %d\n", status);
 		exit(status);
 	}
 
-		printf("calling phase 3 \n");
-		status = clEnqueueNDRangeKernel(cmdQueue, phase3, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
-		if (status != 0) {
-			printf("Error executing the first phase: %d\n", status);
-			exit(status);
-		}
+	printf("calling phase 3 \n");
+	status = clEnqueueNDRangeKernel(cmdQueue, phase3, 1, 0, &globalWorkSize, &localWorkSize, 0, NULL, NULL);
+	if (status != 0) {
+		printf("Error executing the first phase: %d\n", status);
+		exit(status);
+	}
 	
 	float *results = (float*)malloc(sizeof(float)* graph.vertexCount);
 	status = clEnqueueReadBuffer(cmdQueue, costArrayDevice, CL_FALSE, 0, sizeof(float)*graph.vertexCount, results, 0, NULL, &readDone);
