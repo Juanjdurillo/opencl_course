@@ -30,7 +30,7 @@ int main() {
 	// to clGetPlatformsIDs() with NULL argument as second argument
 	status = clGetPlatformIDs(0, NULL, &numPlatforms);
 	if (status != 0) {
-		printf("Status value %d\n",status);
+		printf("Status value %d\n", status);
 		exit(status);
 	}
 
@@ -52,26 +52,26 @@ int main() {
 		exit(status);
 	}
 
-	status = clGetDeviceIDs(platforms[numPlatforms-1], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+	status = clGetDeviceIDs(platforms[numPlatforms - 1], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
 	if (status != 0) {
-		printf("Error %d while retrieving number of devices for platform %d\n", status, numPlatforms-1);
+		printf("Error %d while retrieving number of devices for platform %d\n", status, numPlatforms - 1);
 		exit(-1);
 	}
 
 	// allocate space for devices
 	devices = (cl_device_id *)malloc(sizeof(cl_device_id)*numDevices);
 	if (devices == NULL) {
-		printf("Error allocating memory to store devices id for platform %d\n", numPlatforms-1);
+		printf("Error allocating memory to store devices id for platform %d\n", numPlatforms - 1);
 		exit(-1);
 	}
 
 	//we obtain them althoug so far we do nothing with them
-	status = clGetDeviceIDs(platforms[numPlatforms-1], CL_DEVICE_TYPE_ALL, numDevices, devices, 0);
+	status = clGetDeviceIDs(platforms[numPlatforms - 1], CL_DEVICE_TYPE_ALL, numDevices, devices, 0);
 	if (status != 0) {
 		printf("Error %d when obtaining devices on platform %d\n", status, numPlatforms - 1);
 		exit(status);
 	}
-		
+
 	//creating a context 
 	//-------------creating a context-------------------------//
 	cl_context context = NULL;
@@ -85,11 +85,11 @@ int main() {
 	cl_int selectedDevice = 0;
 	cl_command_queue cmdQueue;
 
-	cl_queue_properties qprop[] = { CL_QUEUE_PROPERTIES,(cl_command_queue_properties)CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
-									CL_QUEUE_PROFILING_ENABLE, 0 };
-	
+	cl_queue_properties qprop[] = { CL_QUEUE_PROPERTIES, (cl_command_queue_properties)CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
+		CL_QUEUE_PROFILING_ENABLE, 0 };
 
-	cmdQueue = clCreateCommandQueueWithProperties(context, devices[selectedDevice],qprop, &status);
+
+	cmdQueue = clCreateCommandQueueWithProperties(context, devices[selectedDevice], qprop, &status);
 	if (status != 0) {
 		printf("Error %d when creating the queue for the device %d on platform %d\n", status, selectedDevice, numPlatforms - 1);
 		exit(status);
@@ -97,7 +97,7 @@ int main() {
 
 	// creating the program
 	size_t sourceSize;
-	char * programStr = createProgramFromFile("Kernels.cl",&sourceSize);
+	char * programStr = createProgramFromFile("Kernels.cl", &sourceSize);
 
 	cl_program clProgram;
 	clProgram = clCreateProgramWithSource(context, 1, (const char **)&programStr, (const size_t*)&sourceSize, &status);
@@ -125,49 +125,18 @@ int main() {
 		exit(status);
 	}
 
-	
+
 	size_t globalWorkSize[1];
 	size_t localWorkSize[1];
 	globalWorkSize[0] = 8;
 	localWorkSize[0] = 8;
 
-	size_t size = 8 * sizeof(float);
-
-	float* p =(float *) clSVMAlloc(
-
-		context,            // an OpenCL context where this buffer is available
-
-		CL_MEM_READ_ONLY,   // access mode for the kernel and other options; here
-		// only read-only access is required
-
-		size,               // amount of memory to allocate (in bytes)
-
-		0                   // alignment in bytes (0 means default)
-		);
-
-	if (p == NULL) {
-		printf("Error when allocating SVM memory");
-		exit(-1);
-	}
-
-
-	for (unsigned int i = 0; i < 8; i++) {
-		p[i] = 1.0 * i;
-	}
-
-
-	status = clSetKernelArgSVMPointer(clKernel, 0, p);
-	if (status != 0) {
-		printf("Error %d when setting a SVM buffer as argument of a kernel\n",status);
-		exit(status);
-	}
-
 	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 1, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
 	if (status != 0) {
-		printf("Errror %d when enqueuing the kernel for execution",status);
+		printf("Errror %d when enqueuing the kernel for execution", status);
 		exit(status);
 	}
-	
+
 	//free host resources
 	clReleaseContext(context);
 	clReleaseCommandQueue(cmdQueue);

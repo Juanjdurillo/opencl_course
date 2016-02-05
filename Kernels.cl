@@ -1,4 +1,4 @@
-__kernel void foo(global float *p) {
- int idx = get_global_id(0);
- printf("Hola %f\n",*(p+idx));
- }
+__kernel void foo() {
+	int idx = get_global_id(0);
+	printf("Hola %d\n", idx);
+}
