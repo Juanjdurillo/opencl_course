@@ -24,6 +24,12 @@ int main() {
 	cl_uint numDevices = 0;
 	cl_platform_id *platforms = NULL;
 	cl_device_id   *devices = NULL;
+	
+	//Elements in each array
+	const int elements = 16;
+
+	//size of the data
+	size_t datasize = sizeof(float)*elements*elements;
 
 
 	// the number of platforms is retrieved by using a first call
@@ -85,7 +91,7 @@ int main() {
 	cl_int selectedDevice = 0;
 	cl_command_queue cmdQueue;
 
-	cl_queue_properties qprop[] = { CL_QUEUE_PROPERTIES,(cl_command_queue_properties)CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
+	cl_queue_properties qprop[] = { CL_QUEUE_PROPERTIES,(cl_command_queue_properties)
 									CL_QUEUE_PROFILING_ENABLE, 0 };
 	
 
@@ -119,24 +125,72 @@ int main() {
 	}
 
 	cl_kernel clKernel;
-	clKernel = clCreateKernel(clProgram, "foo", &status);
+	clKernel = clCreateKernel(clProgram, "matrixMul", &status);
 	if (status != 0) {
 		printf("Error when selecting the kernel to execute: %d\n", status);
 		exit(status);
 	}
 
-	
-	size_t globalWorkSize[1];
-	size_t localWorkSize[1];
-	globalWorkSize[0] = 8;
-	localWorkSize[0] = 8;
+	float* A = (float *)clSVMAlloc(context, CL_MEM_READ_ONLY,  datasize,0 );
+	float *B = (float *)clSVMAlloc(context, CL_MEM_READ_ONLY, datasize, 0);;
+	float *C = (float *)clSVMAlloc(context, CL_MEM_READ_WRITE, datasize, 0);;
 
-	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 1, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
+	// Initialize the input matrices
+	for (int i = 0; i < elements*elements; i++)  {
+		A[i] = 1.0*i;
+		B[i] = 0.0;
+	}
+	B[0] = 1;
+	for (int i = elements + 1; i < elements*elements; i = i + elements + 1)  {
+		B[i] = 1.0;
+	}
+
+
+	clSetKernelArgSVMPointer(clKernel, 1, A);
+	clSetKernelArgSVMPointer(clKernel, 2, B);
+	clSetKernelArgSVMPointer(clKernel, 0, C);
+	
+	status |= clSetKernelArg(clKernel, 3, sizeof(int), (void *)&elements);
+	status |= clSetKernelArg(clKernel, 4, sizeof(int), (void *)&elements);
+	if (status != 0) {
+		printf("Error when setting the parameters of the kernel\n");
+		exit(-1);
+	}
+
+	size_t globalWorkSize[2];
+	size_t localWorkSize[2];
+
+	globalWorkSize[0] = elements;
+	globalWorkSize[1] = elements;
+
+	localWorkSize[0] = 16;
+	localWorkSize[1] = 16;
+	cl_event event;
+	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 2, 0, globalWorkSize, localWorkSize, 0, NULL, &event);
 	if (status != 0) {
 		printf("Errror %d when enqueuing the kernel for execution",status);
 		exit(status);
 	}
+
+	clWaitForEvents(1, &event);
+	cl_ulong start_time;
+	cl_ulong finish_time;
+	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(start_time), &start_time, NULL);
+	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(finish_time), &finish_time, NULL);
+
+
+	cl_ulong total_time = finish_time - start_time;
+	printf("\start time in nanoseconds = %lu\n", start_time);
+	printf("\nend time in nanoseconds = %lu\n", finish_time);
+	printf("\nAverage time in nanoseconds = %lu\n", total_time);
+
 	
+	for (int i = 0; i < elements; i++) {
+		printf("%f\n", C[i]);
+	}
+
+
+
 	//free host resources
 	clReleaseContext(context);
 	clReleaseCommandQueue(cmdQueue);
@@ -145,5 +199,9 @@ int main() {
 	free(devices);
 	free(platforms);
 	free(programStr);
+	clSVMFree(context,A);
+	clSVMFree(context, B);
+	clSVMFree(context, C);
+	
 	return 0;
 }
