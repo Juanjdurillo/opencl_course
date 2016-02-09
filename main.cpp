@@ -24,31 +24,13 @@ int main() {
 	cl_uint numDevices = 0;
 	cl_platform_id *platforms = NULL;
 	cl_device_id   *devices = NULL;
-	cl_mem bufferA, bufferB, bufferC;
-	float *A = NULL; // input array
-	float *B = NULL; // input array
-	float *C = NULL; // output array
-
+	
 	//Elements in each array
 	const int elements = 16;
 
 	//size of the data
 	size_t datasize = sizeof(float)*elements*elements;
 
-	// Allocate space for input/output data
-	A = (float *)malloc(datasize);
-	B = (float *)malloc(datasize);
-	C = (float *)malloc(datasize);
-
-	// Initialize the input matrices
-	for (int i = 0; i < elements*elements; i++)  {
-		A[i] = 1.0*i;
-		B[i] = 0.0;
-	}
-	B[0] = 1;
-	for (int i = elements+1; i < elements*elements; i=i+elements+1)  {
-		B[i] = 1.0;
-	}
 
 	// the number of platforms is retrieved by using a first call
 	// to clGetPlatformsIDs() with NULL argument as second argument
@@ -149,40 +131,25 @@ int main() {
 		exit(status);
 	}
 
-	bufferA = clCreateBuffer(context, CL_MEM_READ_ONLY, datasize, NULL, &status);
-	if (status != 0) {
-		printf("Error %d when creating a memory buffer\n",status);
-		exit(status);
+	float* A = (float *)clSVMAlloc(context, CL_MEM_READ_ONLY,  datasize,0 );
+	float *B = (float *)clSVMAlloc(context, CL_MEM_READ_ONLY, datasize, 0);;
+	float *C = (float *)clSVMAlloc(context, CL_MEM_READ_WRITE, datasize, 0);;
+
+	// Initialize the input matrices
+	for (int i = 0; i < elements*elements; i++)  {
+		A[i] = 1.0*i;
+		B[i] = 0.0;
 	}
-	bufferB = clCreateBuffer(context, CL_MEM_READ_ONLY, datasize, NULL, &status);
-	if (status != 0) {
-		printf("Error %d when creating a memory buffer\n", status);
-		exit(status);
-	}
-	
-	bufferC = clCreateBuffer(context, CL_MEM_WRITE_ONLY, datasize, NULL, &status);
-	if (status != 0) {
-		printf("Error %d when creating a memory buffer\n", status);
-		exit(status);
+	B[0] = 1;
+	for (int i = elements + 1; i < elements*elements; i = i + elements + 1)  {
+		B[i] = 1.0;
 	}
 
-	// write data from the host to the device 
-	status = clEnqueueWriteBuffer(cmdQueue, bufferA, CL_FALSE, 0, datasize, A, 0, NULL, NULL);
-	if (status != 0) {
-		printf("Error %d when writing information into the device\n", status);
-		exit(status);
-	}
-	
-	status = clEnqueueWriteBuffer(cmdQueue, bufferB, CL_FALSE, 0, datasize, B, 0, NULL, NULL);
-	if (status != 0) {
-		printf("Error %d when writing information into the device\n", status);
-		exit(status);
-	}
 
-	//we need to set the parameters for the kernel
-	status = clSetKernelArg(clKernel, 0, sizeof(cl_mem), &bufferC);
-	status |= clSetKernelArg(clKernel, 1, sizeof(cl_mem), &bufferA);
-	status |= clSetKernelArg(clKernel, 2, sizeof(cl_mem), &bufferB);
+	clSetKernelArgSVMPointer(clKernel, 1, A);
+	clSetKernelArgSVMPointer(clKernel, 2, B);
+	clSetKernelArgSVMPointer(clKernel, 0, C);
+	
 	status |= clSetKernelArg(clKernel, 3, sizeof(int), (void *)&elements);
 	status |= clSetKernelArg(clKernel, 4, sizeof(int), (void *)&elements);
 	if (status != 0) {
@@ -198,14 +165,25 @@ int main() {
 
 	localWorkSize[0] = 16;
 	localWorkSize[1] = 16;
-
-	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 2, 0, globalWorkSize, localWorkSize, 0, NULL, NULL);
+	cl_event event;
+	status = clEnqueueNDRangeKernel(cmdQueue, clKernel, 2, 0, globalWorkSize, localWorkSize, 0, NULL, &event);
 	if (status != 0) {
 		printf("Errror %d when enqueuing the kernel for execution",status);
 		exit(status);
 	}
 
-	status = clEnqueueReadBuffer(cmdQueue, bufferC, CL_TRUE, 0, datasize, C, 0, NULL, NULL);
+	clWaitForEvents(1, &event);
+	cl_ulong start_time;
+	cl_ulong finish_time;
+	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_START, sizeof(start_time), &start_time, NULL);
+	clGetEventProfilingInfo(event, CL_PROFILING_COMMAND_END, sizeof(finish_time), &finish_time, NULL);
+
+
+	cl_ulong total_time = finish_time - start_time;
+	printf("\start time in nanoseconds = %lu\n", start_time);
+	printf("\nend time in nanoseconds = %lu\n", finish_time);
+	printf("\nAverage time in nanoseconds = %lu\n", total_time);
+
 	
 	for (int i = 0; i < elements; i++) {
 		printf("%f\n", C[i]);
@@ -218,14 +196,12 @@ int main() {
 	clReleaseCommandQueue(cmdQueue);
 	clReleaseProgram(clProgram);
 	clReleaseKernel(clKernel);
-	clReleaseMemObject(bufferA);
-	clReleaseMemObject(bufferB);
-	clReleaseMemObject(bufferC);
 	free(devices);
 	free(platforms);
 	free(programStr);
-	free(A);
-	free(B);
-	free(C);
+	clSVMFree(context,A);
+	clSVMFree(context, B);
+	clSVMFree(context, C);
+	
 	return 0;
 }

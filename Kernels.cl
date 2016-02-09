@@ -23,7 +23,5 @@ __kernel void matrixMul(__global float* C, __global float* A, __global float* B,
 		float elementB = B[k * wB + tx];
 		value += elementA * elementB;
 	}
-	printf("value %f\n", value);
-
 	C[ty * wA + tx] = value;
 }
