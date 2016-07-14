@@ -88,9 +88,9 @@ int main() {
 	
 	}
 
-	while (true) {
+	/*while (true) {
 		;
-	}
+	}*/
 
 	//free host resources	
 	free(platforms);
